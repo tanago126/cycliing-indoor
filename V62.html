@@ -135,9 +135,10 @@
   #imBackgroundVideo{
     position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
     width:100vw; height:56.25vw; min-height:100vh; min-width:177.78vh;
-    border:none; pointer-events:none;
+    border:none; pointer-events:auto; z-index:1;
   }
-  #imBackgroundOverlay{position:absolute; inset:0; background:rgba(6,7,12,.62);}
+  /* O vídeo YouTube é realmente clicável: permite usar os controlos/Skip da publicidade do próprio YouTube. */
+  #imBackgroundOverlay{position:absolute; inset:0; background:rgba(6,7,12,.38); pointer-events:none; z-index:2;}
   #instructorModePanel > *:not(#imBackgroundWrap){position:relative; z-index:2;}
   #instructorExitBtn{position:absolute; top:24px; right:24px;}
   .im-instructor-playlist{position:absolute;top:14px;left:18px;right:18px;z-index:8;background:rgba(4,9,16,.82);border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:10px 12px;backdrop-filter:blur(12px);box-shadow:0 10px 30px rgba(0,0,0,.22)}
@@ -244,7 +245,12 @@
     border-radius:7px; padding:8px 10px; font-size:12.5px; margin-bottom:10px;
     display:flex; align-items:center; gap:10px; flex-wrap:wrap;
   }
-  .tc-track{font-size:14px; font-weight:600; margin-bottom:6px;}
+  
+  .tc-youtube-box{margin:8px 0 10px;padding:9px 10px;border:1px solid rgba(88,217,255,.16);border-radius:10px;background:rgba(6,14,22,.55);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .tc-youtube-box .yt-label{font-size:10px;font-weight:800;letter-spacing:.8px;color:#78cfff;white-space:nowrap;}
+  .tc-youtube-combo{flex:1 1 420px;min-width:260px;background:var(--bg-panel-2);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:7px 9px;font-size:12px;}
+  .tc-youtube-status{font-size:10px;color:var(--text-dim);width:100%;}
+.tc-track{font-size:14px; font-weight:600; margin-bottom:6px;}
   .tc-stats{display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-dim); margin-bottom:6px;}
   .tc-stats b{color:var(--text); font-family:'Oswald',sans-serif;}
   .tc-compat{font-size:13px; font-weight:600; margin-bottom:10px;}
@@ -2823,6 +2829,44 @@ function renderUsageStatus(){
   });
 }
 
+function getYouTubeComboOptions(currentUrl='', results=[]) {
+  const seen=new Set(), out=[];
+  const add=(value,label)=>{
+    value=String(value||'').trim(); if(!value||seen.has(value)) return; seen.add(value);
+    out.push({value,label:String(label||value)});
+  };
+  // IMPORTANTE: estes links pertencem apenas ao MODO INSTRUTOR.
+  // Não reutilizar a Biblioteca de Vídeos do Simulador.
+  (Array.isArray(results)?results:[]).forEach(v=>add(v?.url, v?.title||v?.url));
+  if(currentUrl) add(currentUrl,'🔗 Vídeo YouTube escolhido para o Instrutor');
+  return out;
+}
+function setAssignmentYouTube(idx,value){
+  const a=assignedPlan[idx]; if(!a) return;
+  const v=String(value||'').trim();
+  a.instructorYoutubeUrl=v;
+  a.instructorYoutubeManual=!!v;
+  // Não escrever em youtubeUrl/track.youtubeUrl: essas propriedades podem ser usadas pelo Simulador.
+  renderTimeline();
+}
+
+
+function renderInstructorYouTubeResults(a,idx){
+  const results=Array.isArray(a?.instructorYoutubeResults)?a.instructorYoutubeResults.slice(0,10):[];
+  if(!results.length) return '<div class="yt-results-empty">🔎 A pesquisar vídeos no YouTube…</div>';
+  const selected=String(a.instructorYoutubeUrl||'');
+  return `<div class="yt-results-title">🎬 ${results.length} vídeos encontrados — escolhe o vídeo que queres no Instrutor:</div>`+
+    results.map((v,i)=>{
+      const isSel=selected===String(v.url||'');
+      const thumb=v.id?`https://i.ytimg.com/vi/${encodeURIComponent(v.id)}/mqdefault.jpg`:'';
+      return `<div class="yt-result-row ${isSel?'selected':''}">
+        <img class="yt-result-thumb" src="${thumb}" alt="" loading="lazy">
+        <div class="yt-result-info"><b>${escapeHtml(v.title||'Vídeo YouTube')}</b><span>${escapeHtml(v.channel||'YouTube')}</span></div>
+        <button type="button" class="btn ${isSel?'btn-cool':''}" data-youtube-pick="${idx}" data-youtube-url-pick="${escapeHtml(v.url||'')}">${isSel?'✅ Selecionado':'▶ Usar este'}</button>
+      </div>`;
+    }).join('');
+}
+
 function renderTimeline(){
   const el = document.getElementById('timeline');
   el.innerHTML = '';
@@ -2838,6 +2882,14 @@ function renderTimeline(){
       </div>
       ${needsReeval ? `<div class="tc-reeval">⚠ Esta música já não é a melhor correspondência para os novos parâmetros. <button class="btn" data-reeval="${idx}">🔄 Procurar melhor música</button></div>` : ''}
       <div class="tc-track">🎵 ${a.track.name}${a.locked ? ' <span style="color:var(--cool); font-size:11px;">🔒 bloqueada</span>' : ''}</div>
+      <div class="tc-youtube-box">
+        <span class="yt-label">▶ YOUTUBE DA MÚSICA</span>
+        <input class="tc-youtube-combo" list="ytCombo${idx}" data-youtube-url="${idx}" value="${escapeHtml(a.instructorYoutubeUrl||'')}" placeholder="A procurar automaticamente no YouTube…">
+        <datalist id="ytCombo${idx}">${getYouTubeComboOptions(a.instructorYoutubeUrl||'',a.instructorYoutubeResults||[]).map(o=>`<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('')}</datalist>
+        <button class="btn" data-youtube-search="${idx}" style="margin-top:6px;">🔎 Pesquisar/atualizar YouTube</button>
+        <div class="tc-youtube-results" data-youtube-results="${idx}">${renderInstructorYouTubeResults(a,idx)}</div>
+        <span class="tc-youtube-status">A pesquisa é feita automaticamente no YouTube. São mostrados até 10 vídeos desta música para escolheres. Não usa links do Simulador.</span>
+      </div>
       <div style="font-size:11px;color:var(--text-dim);margin:-2px 0 8px;">
         Fase: <b style="color:var(--text);">${a.phase.name}</b> · Música ${a.phaseSlot || 1} de ${a.phaseTrackCount || 1} · ${formatTime(a.durSec)} definidos para esta música — estes segundos são teus e a IA não os altera.
       </div>
@@ -2863,10 +2915,68 @@ function renderTimeline(){
   });
   wireTimelineActions();
   renderVisualMontador();
+  // Pesquisa automática: o utilizador não precisa de colar links.
+  setTimeout(()=>autoPopulateInstructorYouTubeLinks(),0);
+}
+
+let instructorAutoSearchRunning=false;
+async function autoPopulateInstructorYouTubeLinks(){
+  if(instructorAutoSearchRunning)return;
+  const key=(document.getElementById('settingYoutubeApiKey')?.value||localStorage.getItem('ytApiKey')||'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso').trim();
+  if(!key||!Array.isArray(assignedPlan)||!assignedPlan.length)return;
+  instructorAutoSearchRunning=true;
+  try{
+    for(const a of assignedPlan){
+      if(!a?.track)continue;
+      const q=cleanInstructorQuery(a.track.name||a.track.title||a.track.artist||'');
+      if(!q||a.instructorYoutubeUrl||a.instructorYoutubeSearch===q)continue;
+      await searchInstructorYouTubeVideos(a.track,a);
+    }
+    // Atualiza os campos sem iniciar reprodução nem abrir o Simulador.
+    const tl=document.getElementById('timeline');
+    if(tl)renderTimeline();
+  }finally{instructorAutoSearchRunning=false;}
 }
 
 function wireTimelineActions(){
   const el = document.getElementById('timeline');
+
+  el.querySelectorAll('[data-youtube-url]').forEach(inp => inp.addEventListener('change', e => {
+    const idx=Number(e.currentTarget.dataset.youtubeUrl);
+    setAssignmentYouTube(idx,e.currentTarget.value);
+    renderTimeline();
+  }));
+
+  el.querySelectorAll('[data-youtube-pick]').forEach(btn => btn.addEventListener('click', e => {
+    const idx=Number(e.currentTarget.dataset.youtubePick), a=assignedPlan[idx];
+    const url=String(e.currentTarget.dataset.youtubeUrlPick||'').trim();
+    if(!a||!url)return;
+    a.instructorYoutubeUrl=url;
+    a.instructorYoutubeManual=true;
+    a.instructorYoutubeAutoUrl=url;
+    renderTimeline();
+    if(status){status.textContent=`✅ Vídeo escolhido para “${a.track?.name||'música'}” no Modo Instrutor.`;status.className='status ok';}
+  }));
+
+  el.querySelectorAll('[data-youtube-search]').forEach(btn => btn.addEventListener('click', async e => {
+    const idx=Number(e.currentTarget.dataset.youtubeSearch), a=assignedPlan[idx];
+    if(!a)return;
+    const key=(document.getElementById('settingYoutubeApiKey')?.value||localStorage.getItem('ytApiKey')||'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso').trim();
+    if(!key){
+      if(status){status.textContent='⚠️ Para a pesquisa automática do YouTube, coloca primeiro a Chave da API YouTube em Definições.';status.className='status warn';}
+      return;
+    }
+    e.currentTarget.disabled=true;
+    e.currentTarget.textContent='🔎 A pesquisar…';
+    try{
+      a.instructorYoutubeSearch='';
+      const r=await searchInstructorYouTubeVideos(a.track,a);
+      if(r.length){
+        renderTimeline();
+        if(status){status.textContent=`✅ YouTube encontrado para “${a.track?.name||'música'}”. Link colocado automaticamente no Modo Instrutor.`;status.className='status ok';}
+      }else if(status){status.textContent='⚠️ O YouTube não devolveu resultados para esta música.';status.className='status warn';}
+    }finally{e.currentTarget.disabled=false;e.currentTarget.textContent='🔎 Pesquisar/atualizar YouTube';}
+  }));
 
   el.querySelectorAll('[data-stop-preview]').forEach(btn => btn.addEventListener('click', e => {
     previewCancelToken++;
@@ -2947,7 +3057,7 @@ function wireTimelineActions(){
     if(!next){ a.phase.rejectedTrackIds = []; return; }
     next.track.usageCount = (next.track.usageCount||0) + 1;
     next.track.lastGenOrdinal = generationOrdinal;
-    a.track = next.track; a.comp = next.comp;
+    a.track = next.track; a.youtubeUrl = ''; a.comp = next.comp;
     a.currentBpm = Math.min(a.phase.bpmMax, Math.max(a.phase.bpmMin, next.track.bpm));
     resetEditParams(a);
     a.phase.assignedSignature = phaseSignature(a.phase);
@@ -2970,7 +3080,7 @@ function wireTimelineActions(){
     if(!best) return;
     best.track.usageCount = (best.track.usageCount||0) + 1;
     best.track.lastGenOrdinal = generationOrdinal;
-    a.track = best.track; a.comp = best.comp;
+    a.track = best.track; a.youtubeUrl = ''; a.comp = best.comp;
     a.currentBpm = Math.min(a.phase.bpmMax, Math.max(a.phase.bpmMin, best.track.bpm));
     resetEditParams(a);
     a.phase.assignedSignature = phaseSignature(a.phase);
@@ -3001,7 +3111,7 @@ function wireTimelineActions(){
       if(!newTrack) return;
       newTrack.usageCount = (newTrack.usageCount||0) + 1;
       newTrack.lastGenOrdinal = generationOrdinal;
-      a.track = newTrack; a.comp = compatibilityScore(newTrack, a.phase);
+      a.track = newTrack; a.youtubeUrl = ''; a.comp = compatibilityScore(newTrack, a.phase);
       a.currentBpm = Math.min(a.phase.bpmMax, Math.max(a.phase.bpmMin, newTrack.bpm));
       resetEditParams(a);
       a.phase.assignedSignature = phaseSignature(a.phase);
@@ -4768,57 +4878,82 @@ function renderInstructorPhaseStrip(){const h=document.getElementById('imPhaseSt
 function updateInstructorPhaseStrip(){const a=document.getElementById('previewAudio'),bs=computeTimelineBoundaries(),groups=instructorPhaseGroups();if(!a)return;const cur=currentInstructorBoundary();document.querySelectorAll('.im-phase-chip').forEach((e,i)=>e.classList.toggle('active',!!cur&&groups[i]?.items.some(x=>x.index===cur.index)));const activePhase=cur?groups.findIndex(g=>g.items.some(x=>x.index===cur.index)):-1;document.querySelectorAll('.im-song-chip').forEach(e=>e.classList.toggle('active',!!cur&&Number(e.dataset.imSong)===cur.index));if(activePhase>=0){const h=document.getElementById('imPhaseStrip'),chip=h?.querySelector(`[data-im-phase="${activePhase}"]`);chip?.scrollIntoView({block:'nearest',inline:'center'});}}
 const IM_FALLBACK_YOUTUBE_URL='https://www.youtube.com/watch?v=ztVV54sPOns&list=RDztVV54sPOns&start_radio=1';let lastInstructorPhaseIndex=-1;
 function isInstructorFallbackUrl(u){return String(u||'').includes('ztVV54sPOns');}
-function youtubeTitleScore(title,query){const t=String(title||'').toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi,' '),q=String(query||'').toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi,' ').trim();if(!t||!q)return 0;const words=q.split(/\s+/).filter(w=>w.length>2);let score=0;for(const w of words){if(t.includes(w))score+=1;}if(t.includes(q))score+=4;if(/official|audio|music|topic/i.test(t))score+=0.5;return score;}
-async function findYouTubeForTrack(track, assignment=null){
-  if(!track && !assignment)return IM_FALLBACK_YOUTUBE_URL;
+function youtubeTitleScore(title,query){const t=String(title||'').toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi,' '),q=String(query||'').toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi,' ').trim();if(!t||!q)return 0;const words=q.split(/\s+/).filter(w=>w.length>2);let score=0;for(const w of words){if(t.includes(w))score+=1;}if(t.includes(q))score+=5;if(/official|official video|official audio|audio|music|topic|lyrics/i.test(t))score+=0.75;return score;}
+function cleanInstructorQuery(name){
+  return String(name||'').replace(/\.(mp3|wav|m4a|aac|flac)$/i,'').replace(/\((mp3|wav|m4a|aac|flac)[^)]*\)/ig,'').replace(/\b\d{3,4}k\b/ig,'').replace(/[_]+/g,' ').replace(/\s+/g,' ').trim();
+}
+async function searchInstructorYouTubeVideos(track, assignment=null){
   const t=track||assignment?.track||{};
-  // Se a própria música já tiver um vídeo associado, usa-o primeiro.
-  const direct=t.youtubeUrl||t.youtubeURL||t.videoUrl||t.videoURL||assignment?.youtubeUrl||assignment?.videoUrl;
-  if(direct&&!isInstructorFallbackUrl(direct))return direct;
-  const key=(document.getElementById('settingYoutubeApiKey')?.value||localStorage.getItem('ytApiKey')||'').trim();
-  const query=String(t.name||t.title||t.artist||'').trim();
-  if(key&&query){
-    try{
-      const searches=[`${query} official audio`,query];
-      for(const q of searches){
-        const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=${encodeURIComponent(q)}&key=${encodeURIComponent(key)}`);
-        const d=await r.json();
-        if(d?.error)throw new Error(d.error.message||'YouTube API error');
-        const items=Array.isArray(d?.items)?d.items.filter(x=>x?.id?.videoId):[];
-        if(items.length){
-          items.sort((a,b)=>youtubeTitleScore(b.snippet?.title,query)-youtubeTitleScore(a.snippet?.title,query));
-          const best=items[0],id=best?.id?.videoId;
-          if(id){t.youtubeUrl='https://www.youtube.com/watch?v='+id;t.youtubeSearchTitle=best.snippet?.title||'';return t.youtubeUrl;}
-        }
-      }
-    }catch(e){console.warn('YouTube lookup',e);}
+  const query=cleanInstructorQuery(t.name||t.title||t.artist||'');
+  const key=(document.getElementById('settingYoutubeApiKey')?.value||localStorage.getItem('ytApiKey')||'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso').trim();
+  if(!query||!key)return [];
+  // Cache por música para não repetir pesquisas a cada renderização.
+  if(assignment?.instructorYoutubeSearch===query && Array.isArray(assignment.instructorYoutubeResults) && assignment.instructorYoutubeResults.length){
+    return assignment.instructorYoutubeResults;
   }
-  // Biblioteca local: primeiro tenta correspondência forte pelo nome da música.
-  const lib=Array.isArray(videoLibrary)?videoLibrary:[];
-  const norm=v=>String(v||'').toLowerCase().replace(/[^a-z0-9à-ÿ]+/gi,' ').trim();
-  const nq=norm(query);
-  let m=nq?lib.find(v=>v.title&&norm(v.title)===nq&&!isInstructorFallbackUrl(v.url)):null;
-  if(!m&&nq)m=lib.find(v=>v.title&&norm(v.title).includes(nq)&&!isInstructorFallbackUrl(v.url));
-  if(m?.url){t.youtubeUrl=m.url;return m.url;}
-  // Último recurso: vídeo definido na própria fase (mantém o vídeo da fase em vez de deixar o ecrã vazio).
-  const phaseUrl=assignment?.phase?.videoInput||assignment?.phase?.youtubeUrl||assignment?.phase?.videoUrl;
-  if(phaseUrl&&!isInstructorFallbackUrl(phaseUrl))return phaseUrl;
-  t.youtubeUrl=IM_FALLBACK_YOUTUBE_URL;
+  try{
+    // Uma pesquisa por música devolve diretamente até 10 candidatos.
+    // Evitamos três chamadas por música para não gastar a quota desnecessariamente.
+    const url=`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=10&order=relevance&videoEmbeddable=true&videoSyndicated=true&regionCode=PT&relevanceLanguage=pt&q=${encodeURIComponent(query)}&key=${encodeURIComponent(key)}`;
+    const r=await fetch(url);
+    const d=await r.json();
+    if(d?.error)throw new Error(d.error.message||'YouTube API error');
+    const all=[];const seen=new Set();
+    for(const item of (Array.isArray(d?.items)?d.items:[])){
+      const id=item?.id?.videoId;if(!id||seen.has(id))continue;seen.add(id);
+      const title=item?.snippet?.title||'';
+      all.push({id,url:'https://www.youtube.com/watch?v='+id,title,channel:item?.snippet?.channelTitle||'',score:youtubeTitleScore(title,query)});
+    }
+    all.sort((a,b)=>b.score-a.score);
+    const results=all.slice(0,10);
+    if(assignment){
+      assignment.instructorYoutubeResults=results;
+      assignment.instructorYoutubeSearch=query;
+      assignment.instructorYoutubeSearchReady=!!results.length;
+      if(results.length){
+        // ESTE é o link automático da música. Não depende do Simulador.
+        assignment.instructorYoutubeUrl=results[0].url;
+        assignment.instructorYoutubeAutoUrl=results[0].url;
+        assignment.instructorYoutubeManual=false;
+      }
+    }
+    if(t){t.instructorYoutubeResults=results;t.instructorYoutubeSearch=query;if(results.length)t.instructorYoutubeUrl=results[0].url;}
+    return results;
+  }catch(e){console.warn('YouTube Instructor search',e);return []}
+}
+
+async function findYouTubeForTrack(track, assignment=null){
+  const t=track||assignment?.track||{};
+  if(!t&&!assignment)return IM_FALLBACK_YOUTUBE_URL;
+  // O Modo Instrutor NÃO usa os links do Simulador/Biblioteca.
+  // Só respeita um link explicitamente definido no campo próprio do Instrutor.
+  const manual=assignment?.instructorYoutubeUrl||t.instructorYoutubeUrl||'';
+  if(manual&&!isInstructorFallbackUrl(manual))return manual;
+  if(Array.isArray(assignment?.instructorYoutubeResults)&&assignment.instructorYoutubeResults.length){
+    const best=assignment.instructorYoutubeResults[0];
+    if(best?.url)return best.url;
+  }
+  const results=await searchInstructorYouTubeVideos(t,assignment);
+  if(results.length){
+    const best=results[0];
+    assignment&&(assignment.instructorYoutubeUrl=best.url,assignment.instructorYoutubeAutoUrl=best.url);
+    return best.url;
+  }
   return IM_FALLBACK_YOUTUBE_URL;
 }
 function instructorEmbedUrl(videoId){
-  return videoId?`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0&rel=0&playsinline=1&enablejsapi=1&iv_load_policy=3`:'';
+  return videoId?`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=1&rel=0&playsinline=1&enablejsapi=1&iv_load_policy=3&fs=1`:'';
 }
 async function loadInstructorVideo(assignment, force=false){
   const f=document.getElementById('imBackgroundVideo');
   if(!f||!assignment)return;
   const u=await findYouTubeForTrack(assignment.track,assignment),id=extractYouTubeId(u);
-  if(!id)return;
+  if(!id){f.src='';return;}
   const target=instructorEmbedUrl(id);
   const currentId=extractYouTubeId(f.src);
   if(!force&&currentId===id)return;
-  // Reutiliza o mesmo iframe visual, mas força a troca do vídeo quando muda a música.
   f.src=target;
+  f.setAttribute('title','YouTube — '+String(assignment.track?.name||'Música atual'));
 }
 document.getElementById('instructorModeBtn').addEventListener('click',async()=>{if(!assignedPlan.length)return;lastInstructorPhaseIndex=-1;const st=document.getElementById('imStatus'),panel=document.getElementById('instructorModePanel');panel.classList.add('active');panel.requestFullscreen?.().catch(()=>{});updateInstructorPanel();renderInstructorPhaseStrip();await loadInstructorVideo(assignedPlan[0],true);const fresh=!cachedMix||cachedMixSignature!==planSignature();if(fresh){st.textContent='⚠️ Ainda não existe uma pré-visualização desta configuração. Fecha o Modo Instrutor e clica manualmente em «Pré-visualizar aula».';return;}const a=document.getElementById('previewAudio');a.currentTime=0;a.play().catch(()=>{st.textContent='Carrega em ▶ para começar.';});updateInstructorPanel();updateInstructorPhaseStrip();});
 document.getElementById('instructorExitBtn').addEventListener('click',()=>{document.getElementById('previewAudio').pause();document.getElementById('instructorModePanel').classList.remove('active');document.getElementById('imBackgroundVideo').src='';if(document.fullscreenElement)document.exitFullscreen();});
@@ -5181,7 +5316,7 @@ document.getElementById('libLockAgainBtn').addEventListener('click', () => {
 });
 
 async function fetchYouTubeMeta(videoId){
-  const apiKey = document.getElementById('libApiKeyInput').value.trim();
+  const apiKey = document.getElementById('libApiKeyInput').value.trim() || 'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso';
   if(!apiKey) return null;
   try{
     const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`);
@@ -5216,7 +5351,7 @@ async function renderVideoLibrary(){
   });
   // vai buscar títulos reais (em lote, até 50 ids por pedido) sem bloquear a lista já visível
   const idsNeeded = videoLibrary.filter(v => !v.title && extractYouTubeId(v.url)).map(v => extractYouTubeId(v.url));
-  const apiKey = document.getElementById('libApiKeyInput').value.trim();
+  const apiKey = document.getElementById('libApiKeyInput').value.trim() || 'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso';
   if(idsNeeded.length && apiKey){
     try{
       const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${idsNeeded.join(',')}&key=${apiKey}`);
@@ -5254,7 +5389,7 @@ async function searchYouTube(){
   const statusEl = document.getElementById('libSearchStatus');
   const resultsEl = document.getElementById('libSearchResults');
   const query = document.getElementById('libSearchInput').value.trim();
-  const apiKey = document.getElementById('libApiKeyInput').value.trim();
+  const apiKey = document.getElementById('libApiKeyInput').value.trim() || 'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso';
   resultsEl.innerHTML = '';
   if(!query){ return; }
   if(!apiKey){
@@ -6481,7 +6616,7 @@ const DEFAULT_APP_SETTINGS = {
   theme:'midnight', density:'comfortable', accent:'cyan', animations:true,
   autoMode:true, voice:true, voiceLang:'pt-PT', useMix:false,
   battleRounds:10, battlePower:true, battleFullscreen:false, battleWake:true,
-  battlePublicUrl:'', livekitUrl:'wss://battle-ngfln3yb.livekit.cloud', livekitTokenEndpoint:'', youtubeApiKey:''
+  battlePublicUrl:'', livekitUrl:'wss://battle-ngfln3yb.livekit.cloud', livekitTokenEndpoint:'', youtubeApiKey:'AIzaSyDSkTtO2u-Q_o2-Ag7_Gi7Jh_70dCF7uso'
 };
 let appSettings = loadAppSettings();
 if(!appSettings.livekitUrl) appSettings.livekitUrl = PRECONFIGURED_LIVEKIT.serverUrl;
@@ -6860,6 +6995,17 @@ setTimeout(()=>restoreBattleSession(),200);
   #battleMode.battle-v4 .battle-bottom-grid{grid-template-columns:1fr!important}
 }
 
+
+.tc-youtube-results{margin-top:8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.12)}
+.yt-results-title{font-size:11px;color:var(--text-dim);margin-bottom:7px}
+.yt-result-row{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:9px;align-items:center;padding:7px;border-radius:10px;border:1px solid transparent;margin:4px 0;background:rgba(255,255,255,.025)}
+.yt-result-row.selected{border-color:var(--cool);background:rgba(0,220,255,.06)}
+.yt-result-thumb{width:96px;height:54px;object-fit:cover;border-radius:7px;background:#111}
+.yt-result-info{min-width:0;display:flex;flex-direction:column;gap:3px}
+.yt-result-info b{font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.yt-result-info span{font-size:10px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.yt-results-empty{font-size:11px;color:var(--text-dim);padding:8px}
+@media(max-width:700px){.yt-result-row{grid-template-columns:72px minmax(0,1fr);}.yt-result-row button{grid-column:2;justify-self:start}.yt-result-thumb{width:72px;height:42px}}
 </style>
 <script>
 (function(){
